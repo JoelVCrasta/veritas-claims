@@ -1,0 +1,9 @@
+{
+  "checks": {
+    "document_id": true,
+    "content_hash": true,
+    "claim_no": true
+  },
+  "action_on_duplicate": "suppress_to_dead_letter",
+  "hash_scope": "clinical_payload"
+}

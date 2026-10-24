@@ -1,0 +1,18 @@
+# Virtual environment
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Database artifacts
+data/test*.db
+data
+
+# OS files
+.DS_Store
+Thumbs.db

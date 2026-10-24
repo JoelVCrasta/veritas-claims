@@ -1,0 +1,68 @@
+{
+  "FASTTRACK": {
+    "system_name": "FASTTRACK",
+    "document_id_field": "data.documentId",
+    "correlation_id_field": "data.correlationId",
+    "meta_details_field": "data.metaDetails",
+    "response_details_field": "data.responseDetails",
+    "patient_fields": {
+      "patient_name": [
+        "patient_name",
+        "patientName"
+      ],
+      "age": [
+        "age"
+      ],
+      "gender": [
+        "gender"
+      ],
+      "uhid": [
+        "uhid"
+      ]
+    }
+  },
+  "ARTEMIS": {
+    "system_name": "ARTEMIS",
+    "document_id_field": "data.documentId",
+    "correlation_id_field": "data.correlationId",
+    "meta_details_field": "data.metaDetails",
+    "response_details_field": "data.responseDetails",
+    "patient_fields": {
+      "patient_name": [
+        "patient_name",
+        "patientName"
+      ],
+      "age": [
+        "age"
+      ],
+      "gender": [
+        "gender"
+      ],
+      "uhid": [
+        "uhid"
+      ]
+    }
+  },
+  "DEFAULT": {
+    "system_name": "GENERIC_CLINIC",
+    "document_id_field": "data.documentId",
+    "correlation_id_field": "data.correlationId",
+    "meta_details_field": "data.metaDetails",
+    "response_details_field": "data.responseDetails",
+    "patient_fields": {
+      "patient_name": [
+        "patient_name",
+        "patientName"
+      ],
+      "age": [
+        "age"
+      ],
+      "gender": [
+        "gender"
+      ],
+      "uhid": [
+        "uhid"
+      ]
+    }
+  }
+}

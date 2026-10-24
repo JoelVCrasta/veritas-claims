@@ -1,0 +1,310 @@
+{
+  // Test Name Normalization Dictionary
+
+  "HAEMOGLOBIN": {
+    "aliases": [
+      "Haemoglobin",
+      "Hemoglobin",
+      "Hb",
+      "HGB",
+      "haemoglobin",
+      "aemoglobin"
+    ],
+    "canonical_unit": "g/dL",
+    "unit_conversions": {
+      "g/dL": 1.0,
+      "gm/dL": 1.0,
+      "g/L": 0.1
+    }
+  },
+
+  "WHITE BLOOD CELL COUNT": {
+    "aliases": [
+      "TOTAL WBC COUNT",
+      "Total WBC Count",
+      "WBC COUNT",
+      "tal WBC Count",
+      "Total Leucocyte Count",
+      "TLC",
+      "LEUCOCYTES",
+      "Total Leucocytes Count (TLC)",
+      "WHITE BLOOD CELL COUNT"
+    ],
+    "canonical_unit": "cells/cu.mm",
+    "unit_conversions": {
+      "cells/cu.mm": 1.0,
+      "cell/cu.mm": 1.0,
+      "cells/cumm": 1.0,
+      "/cu.mm": 1.0,
+      "10^3/uL": 1000.0,
+      "mil/cu.mm": 1000000.0
+    }
+  },
+
+  "SERUM CREATININE": {
+    "aliases": [
+      "CREATININE, SERUM",
+      "SERUM CREATININE",
+      "Serum Creatinine",
+      "CREATININE",
+      "Creatinine"
+    ],
+    "canonical_unit": "mg/dL",
+    "unit_conversions": {
+      "mg/dL": 1.0,
+      "mg/dl": 1.0,
+      "umol/L": 0.0113
+    }
+  },
+
+  "SODIUM": {
+    "aliases": [
+      "Na+",
+      "SODIUM",
+      "Sodium",
+      "Sodium (Na)",
+      "SERUM SODIUM"
+    ],
+    "canonical_unit": "mmol/L",
+    "unit_conversions": {
+      "mmol/L": 1.0,
+      "mEq/L": 1.0
+    }
+  },
+
+  "POTASSIUM": {
+    "aliases": [
+      "K+",
+      "POTASSIUM",
+      "Potassium",
+      "Potassium (K)",
+      "SERUM POTASSIUM"
+    ],
+    "canonical_unit": "mmol/L",
+    "unit_conversions": {
+      "mmol/L": 1.0,
+      "mEq/L": 1.0
+    }
+  },
+
+  "RED BLOOD CELL COUNT": {
+    "aliases": [
+      "RBC",
+      "RBC COUNT",
+      "Red Blood Cell Count",
+      "Total RBC Count",
+      "R.B.C COUNT",
+      "Red Blood Cell Count (RBC)"
+    ],
+    "canonical_unit": "mil/cu.mm",
+    "unit_conversions": {
+      "mil/cu.mm": 1.0,
+      "10^6/uL": 1.0,
+      "million/cu.mm": 1.0
+    }
+  },
+
+  "PLATELET COUNT": {
+    "aliases": [
+      "PLATELET COUNT",
+      "Platelet Count",
+      "Platelets",
+      "PLT"
+    ],
+    "canonical_unit": "cells/cu.mm",
+    "unit_conversions": {
+      "cells/cu.mm": 1.0,
+      "cell/cu.mm": 1.0,
+      "cells/cumm": 1.0,
+      "/cu.mm": 1.0,
+      "lakhs/cumm": 100000.0,
+      "10^3/uL": 1000.0
+    }
+  },
+
+  "ALBUMIN": {
+    "aliases": [
+      "ALBUMIN",
+      "ALBUMIN, SERUM",
+      "Albumin",
+      "Serum Albumin"
+    ],
+    "canonical_unit": "g/dL",
+    "unit_conversions": {
+      "g/dL": 1.0,
+      "gm/dL": 1.0
+    }
+  },
+
+  "HEMATOCRIT": {
+    "aliases": [
+      "HAEMATOCRIT",
+      "Haematocrit (PCV)",
+      "HEMATOCRIT",
+      "ematocrit HCT",
+      "PCV",
+      "Packed Cell Volume (PCV)"
+    ],
+    "canonical_unit": "%",
+    "unit_conversions": {
+      "%": 1.0
+    }
+  },
+
+  "PROCALCITONIN": {
+    "aliases": [
+      "PROCALCITONIN",
+      "PROCALCITONIN (PCT)",
+      "Procalcitonin",
+      "PCT"
+    ],
+    "canonical_unit": "ng/mL",
+    "unit_conversions": {
+      "ng/mL": 1.0,
+      "ug/L": 1.0
+    }
+  },
+
+  "C-REACTIVE PROTEIN": {
+    "aliases": [
+      "C-REACTIVE PROTEIN (CRP)",
+      "CRP",
+      "C-Reactive Protein",
+      "C-REACTIVE PROTEIN"
+    ],
+    "canonical_unit": "mg/L",
+    "unit_conversions": {
+      "mg/L": 1.0,
+      "mg/dL": 10.0
+    }
+  },
+
+  "ALANINE AMINOTRANSFERASE": {
+    "aliases": [
+      "ALANINE AMINOTRANSFERASE",
+      "ALT (SGPT)",
+      "ALANINE AMINOTRANSFERASE (ALT/SGPT)",
+      "ALANINE AMINOTRANSFERASE(ALT/SGPT)",
+      "Alanine Transaminase (ALT)",
+      "SGPT"
+    ],
+    "canonical_unit": "U/L",
+    "unit_conversions": {
+      "U/L": 1.0,
+      "IU/L": 1.0
+    }
+  },
+
+  "ASPARTATE AMINOTRANSFERASE": {
+    "aliases": [
+      "ASPARTATE AMINOTRANSFERASE",
+      "AST (SGOT)",
+      "ASPARTATE AMINOTRANSFERASE (AST/SGOT)",
+      "ASPARTATE AMINOTRANSFERASE(AST/SGOT)",
+      "Aspartate Transaminase (SGOT, HAST)",
+      "SGOT"
+    ],
+    "canonical_unit": "U/L",
+    "unit_conversions": {
+      "U/L": 1.0,
+      "IU/L": 1.0
+    }
+  },
+
+  "URIC ACID": {
+    "aliases": [
+      "URIC ACID",
+      "URIC ACID, SERUM",
+      "Uric Acid",
+      "Serum Uric Acid"
+    ],
+    "canonical_unit": "mg/dL",
+    "unit_conversions": {
+      "mg/dL": 1.0,
+      "mg/dl": 1.0
+    }
+  },
+
+  "CALCIUM": {
+    "aliases": [
+      "CALCIUM",
+      "Ca2+ (Calcium)",
+      "Calcium",
+      "Serum Calcium"
+    ],
+    "canonical_unit": "mg/dL",
+    "unit_conversions": {
+      "mg/dL": 1.0,
+      "mg/dl": 1.0
+    }
+  },
+
+  "ESTIMATED GLOMERULAR FILTRATION RATE": {
+    "aliases": [
+      "FILTRATION RATE",
+      "eGFR - ESTIMATED GLOMERULAR FILTRATION RATE",
+      "Estimated Glomerular Filtration Rate (eGFR)",
+      "eGFR"
+    ],
+    "canonical_unit": "mL/min/1.73m2",
+    "unit_conversions": {
+      "mL/min/1.73m2": 1.0
+    }
+  },
+
+  "UREA NITROGEN (BUN)": {
+    "aliases": [
+      "BLOOD UREA NITROGEN",
+      "UREA",
+      "Blood Urea Nitrogen (BUN)",
+      "Blood Urea",
+      "BUN"
+    ],
+    "canonical_unit": "mg/dL",
+    "unit_conversions": {
+      "mg/dL": 1.0,
+      "mg/dl": 1.0
+    }
+  },
+
+  "TOTAL BILIRUBIN": {
+    "aliases": [
+      "TOTAL BILIRUBIN",
+      "BILIRUBIN TOTAL",
+      "Bilirubin Total",
+      "BILIRUBIN (TOTAL)"
+    ],
+    "canonical_unit": "mg/dL",
+    "unit_conversions": {
+      "mg/dL": 1.0,
+      "mg/dl": 1.0
+    }
+  },
+
+  "ALKALINE PHOSPHATASE": {
+    "aliases": [
+      "ALKALINE PHOSPHATASE",
+      "Alkaline Phosphatase (ALP)",
+      "ALP"
+    ],
+    "canonical_unit": "U/L",
+    "unit_conversions": {
+      "U/L": 1.0,
+      "IU/L": 1.0
+    }
+  },
+
+  "GLUCOSE RANDOM": {
+    "aliases": [
+      "RBS",
+      "GLUCOSE - RANDOM",
+      "Random Blood Sugar",
+      "BLOOD SUGAR RANDOM"
+    ],
+    "canonical_unit": "mg/dL",
+    "unit_conversions": {
+      "mg/dL": 1.0,
+      "mg/dl": 1.0
+    }
+  }
+}
