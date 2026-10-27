@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import difflib
 import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
-
 from dateutil import parser
+from rapidfuzz import fuzz, process
 
 from src.config import PipelineConfig, normalize_lookup_key
+from src.models import resolve_field_value
 
 logger = logging.getLogger("veritas.standardisation")
 
@@ -60,30 +60,21 @@ class StandardisationEngine:
         self.config = config
         self.fuzzy_threshold = fuzzy_threshold
 
-    @staticmethod
-    def is_header_row(item: Dict[str, Any]) -> bool:
-        """Identify if a row is a leaked table header (e.g. test_name='test_name')."""
-        tname = str(item.get("test_name", "")).strip().lower()
-        res = str(item.get("result", "")).strip().lower()
-        rng = str(item.get("range", "")).strip().lower()
-        unt = str(item.get("unit", "")).strip().lower()
+    HEADER_KEYWORDS = {
+        "test_name": {"test_name", "test", "investigation", "parameter"},
+        "result": {"result", "value", "observed_value", "findings"},
+        "range": {"range", "reference_range", "biological_reference_interval", "normal"},
+        "unit": {"unit", "units"},
+    }
 
-        header_signals = 0
-        if tname in ("test_name", "test", "investigation", "parameter"):
-            header_signals += 1
-        if res in ("result", "value", "observed_value", "findings"):
-            header_signals += 1
-        if rng in (
-            "range",
-            "reference_range",
-            "biological_reference_interval",
-            "normal",
-        ):
-            header_signals += 1
-        if unt in ("unit", "units"):
-            header_signals += 1
-
-        return header_signals >= 2
+    @classmethod
+    def is_header_row(cls, item: Dict[str, Any]) -> bool:
+        """Identify if a row is a leaked table header."""
+        signals = sum(
+            str(item.get(k, "")).strip().lower() in words
+            for k, words in cls.HEADER_KEYWORDS.items()
+        )
+        return signals >= 2
 
     def normalize_test_name(self, raw_name: str) -> Tuple[str, str, float]:
         """
@@ -106,18 +97,16 @@ class StandardisationEngine:
             )
             return canonical, method, 1.0
 
-        # 2. Fuzzy match against all known aliases
-        best_match = None
-        best_ratio = 0.0
-
-        for candidate_key, canonical in self.config.alias_lookup.items():
-            ratio = difflib.SequenceMatcher(None, norm_key, candidate_key).ratio()
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = canonical
-
-        if best_match and best_ratio >= self.fuzzy_threshold:
-            return best_match, "FUZZY_MATCH", round(best_ratio, 3)
+        # 2. Fuzzy match against all known aliases using rapidfuzz WRatio
+        match = process.extractOne(
+            norm_key,
+            self.config.alias_lookup.keys(),
+            scorer=fuzz.WRatio,
+            score_cutoff=self.fuzzy_threshold * 100.0,
+        )
+        if match:
+            best_key, score, _ = match
+            return self.config.alias_lookup[best_key], "FUZZY_MATCH", round(score / 100.0, 3)
 
         return cleaned, "UNMAPPED", 0.0
 
@@ -187,9 +176,7 @@ class StandardisationEngine:
                 pass
 
         # Upper bound only: '<50' or '<= 50'
-        match_lt = re.match(r"^<=\s*(\d+(?:\.\d+)?)", text) or re.match(
-            r"^<\s*(\d+(?:\.\d+)?)", text
-        )
+        match_lt = re.match(r"^<=?\s*(\d+(?:\.\d+)?)", text)
         if match_lt:
             try:
                 return 0.0, float(match_lt.group(1)), text
@@ -197,9 +184,7 @@ class StandardisationEngine:
                 pass
 
         # Lower bound only: '>60' or '>= 60'
-        match_gt = re.match(r"^>=\s*(\d+(?:\.\d+)?)", text) or re.match(
-            r"^>\s*(\d+(?:\.\d+)?)", text
-        )
+        match_gt = re.match(r"^>=?\s*(\d+(?:\.\d+)?)", text)
         if match_gt:
             try:
                 return float(match_gt.group(1)), None, text
@@ -322,22 +307,21 @@ class StandardisationEngine:
 
         return text, "", text
 
-    @staticmethod
-    def normalize_gender(raw_gender: Any) -> str:
+    GENDER_MAP = {
+        "m": "M", "male": "M", "man": "M",
+        "f": "F", "female": "F", "woman": "F",
+        "o": "OTHER", "other": "OTHER",
+    }
+
+    @classmethod
+    def normalize_gender(cls, raw_gender: Any) -> str:
         """Standardize gender to 'M', 'F', 'OTHER', or redaction string."""
         if not raw_gender:
             return ""
         text = str(raw_gender).strip()
         if text.startswith("[") and text.endswith("]"):
             return ""
-        lowered = text.lower()
-        if lowered in ("m", "male", "man"):
-            return "M"
-        if lowered in ("f", "female", "woman"):
-            return "F"
-        if lowered in ("o", "other"):
-            return "OTHER"
-        return text.upper()
+        return cls.GENDER_MAP.get(text.lower(), text.upper())
 
     @staticmethod
     def parse_iso_date(raw_date: Any) -> str:
@@ -365,11 +349,7 @@ class StandardisationEngine:
         fmap = field_map or {}
 
         def get_field(field_name: str, fallback_keys: list[str]) -> Any:
-            keys_to_try = fmap.get(field_name) or fallback_keys
-            for k in keys_to_try:
-                if k in basic_info and basic_info[k] not in (None, ""):
-                    return basic_info[k]
-            return ""
+            return resolve_field_value(basic_info, fmap.get(field_name) or fallback_keys)
 
         raw_age = get_field("age", ["age", "patient_age"])
         age_norm, age_years, age_text = self.parse_age(raw_age)

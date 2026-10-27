@@ -4,6 +4,9 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +23,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -108,16 +111,7 @@ def get_records(
 @app.get("/api/runs")
 def get_runs(limit: int = Query(default=10, ge=1, le=50)) -> List[Dict[str, Any]]:
     """Retrieve execution log history."""
-    db = get_db()
-    conn = db._get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM pipeline_runs ORDER BY start_time DESC LIMIT ?", (limit,)
-        )
-        return [dict(row) for row in cur.fetchall()]
-    finally:
-        conn.close()
+    return get_db().get_pipeline_runs(limit=limit)
 
 
 @app.get("/api/dead_letters")
@@ -125,17 +119,7 @@ def get_dead_letters(
     limit: int = Query(default=50, ge=1, le=100)
 ) -> List[Dict[str, Any]]:
     """Retrieve records from dead-letter queue."""
-    db = get_db()
-    conn = db._get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM dead_letter_records ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        )
-        return [dict(row) for row in cur.fetchall()]
-    finally:
-        conn.close()
+    return get_db().get_dead_letter_records(limit=limit)
 
 
 @app.post("/api/run_pipeline", response_model=PipelineRunResponse)
@@ -153,34 +137,27 @@ def run_pipeline() -> PipelineRunResponse:
 # Configuration Management Endpoints
 
 
-def get_clinic_mappings_path() -> Path:
-    return Path(CONFIG_DIR) / "clinic_mappings.jsonc"
+def get_config_file_path(name: str) -> Path:
+    return Path(CONFIG_DIR) / f"{name}.jsonc"
 
 
-def get_dedup_config_path() -> Path:
-    return Path(CONFIG_DIR) / "deduplication.jsonc"
+def read_config_file(name: str) -> Dict[str, Any]:
+    p = get_config_file_path(name)
+    return load_jsonc(p) if p.exists() else {}
+
+
+def save_config_file(name: str, data: Dict[str, Any]) -> None:
+    p = get_config_file_path(name)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 
 def read_clinic_config() -> Dict[str, Any]:
-    p = get_clinic_mappings_path()
-    return load_jsonc(p) if p.exists() else {}
+    return read_config_file("clinic_mappings")
 
 
 def save_clinic_config(data: Dict[str, Any]) -> None:
-    p = get_clinic_mappings_path()
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-
-def read_dedup_config() -> Dict[str, Any]:
-    p = get_dedup_config_path()
-    return load_jsonc(p) if p.exists() else {}
-
-
-def save_dedup_config(data: Dict[str, Any]) -> None:
-    p = get_dedup_config_path()
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    save_config_file("clinic_mappings", data)
 
 
 class ClinicAdapterPayload(BaseModel):
@@ -195,11 +172,9 @@ class DedupSettingsPayload(BaseModel):
 @app.get("/api/configs/clinics")
 def get_clinic_configs() -> Dict[str, Any]:
     """Retrieve all configured clinic adapters and deduplication settings."""
-    clinics = read_clinic_config()
-    dedup = read_dedup_config()
     return {
-        "deduplication": dedup,
-        "clinics": clinics,
+        "deduplication": read_config_file("deduplication"),
+        "clinics": read_config_file("clinic_mappings"),
     }
 
 
@@ -209,9 +184,9 @@ def add_or_update_clinic_config(body: ClinicAdapterPayload) -> Dict[str, Any]:
     key = body.clinic_key.strip().upper()
     if not key:
         raise HTTPException(status_code=400, detail="Clinic key cannot be empty")
-    data = read_clinic_config()
+    data = read_config_file("clinic_mappings")
     data[key] = body.config
-    save_clinic_config(data)
+    save_config_file("clinic_mappings", data)
     logger.info(f"Saved clinic configuration for: {key}")
     return {"status": "SUCCESS", "clinic_key": key, "config": body.config}
 
@@ -222,13 +197,13 @@ def delete_clinic_config(clinic_key: str) -> Dict[str, Any]:
     key = clinic_key.strip().upper()
     if key == "DEFAULT":
         raise HTTPException(status_code=400, detail="Cannot delete default adapter")
-    data = read_clinic_config()
+    data = read_config_file("clinic_mappings")
     if key not in data:
         raise HTTPException(
             status_code=404, detail=f"Clinic configuration '{key}' not found"
         )
     del data[key]
-    save_clinic_config(data)
+    save_config_file("clinic_mappings", data)
     logger.info(f"Deleted clinic configuration for: {key}")
     return {"status": "SUCCESS", "deleted_key": key}
 
@@ -236,9 +211,9 @@ def delete_clinic_config(clinic_key: str) -> Dict[str, Any]:
 @app.put("/api/configs/dedup")
 def update_dedup_settings(body: DedupSettingsPayload) -> Dict[str, Any]:
     """Update active deduplication check toggles."""
-    data = read_dedup_config()
+    data = read_config_file("deduplication")
     data["checks"] = body.checks
-    save_dedup_config(data)
+    save_config_file("deduplication", data)
     logger.info(f"Updated active deduplication checks: {body.checks}")
     return {"status": "SUCCESS", "checks": body.checks}
 
@@ -246,21 +221,6 @@ def update_dedup_settings(body: DedupSettingsPayload) -> Dict[str, Any]:
 # -------------------------------------------------------------------------
 # Test Dictionary Configs
 # -------------------------------------------------------------------------
-
-
-def get_config_file_path(name: str) -> Path:
-    return Path(CONFIG_DIR) / f"{name}.jsonc"
-
-
-def read_config_file(name: str) -> Dict[str, Any]:
-    p = get_config_file_path(name)
-    return load_jsonc(p) if p.exists() else {}
-
-
-def save_config_file(name: str, data: Dict[str, Any]) -> None:
-    p = get_config_file_path(name)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
 
 
 class TestConfigPayload(BaseModel):
@@ -391,3 +351,67 @@ def delete_medicine_config(brand: str) -> Dict[str, Any]:
     del data[b]
     save_config_file("medicine_mapping", data)
     return {"status": "SUCCESS", "deleted_brand": b}
+
+
+# Clinic Onboarding Endpoints
+
+
+class InferMappingRequest(BaseModel):
+    payload: Any
+    clinic_name: Optional[str] = None
+
+
+class ApplyOnboardingRequest(BaseModel):
+    clinic_key: str
+    adapter_config: Dict[str, Any]
+
+
+@app.post("/api/ai/infer-mapping")
+def infer_clinic_mapping(body: InferMappingRequest) -> Dict[str, Any]:
+    raw_payload = body.payload
+    if isinstance(raw_payload, str):
+        try:
+            raw_payload = json.loads(raw_payload)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}")
+
+    if not isinstance(raw_payload, dict):
+        raise HTTPException(
+            status_code=400, detail="Clinic payload must be a JSON object"
+        )
+
+    from src.onboarder import SchemaInferenceEngine
+
+    engine = SchemaInferenceEngine()
+    try:
+        result = engine.infer_and_preview(
+            raw_payload, suggested_clinic_key=body.clinic_name
+        )
+        return result
+    except Exception as exc:
+        logger.error(f"Error during AI schema inference: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"AI inference error: {exc}")
+
+
+@app.post("/api/ai/apply-onboarding")
+def apply_clinic_onboarding(body: ApplyOnboardingRequest) -> Dict[str, Any]:
+    """Save clinic adapter configuration"""
+    clinic_key = body.clinic_key.strip().upper()
+    if not clinic_key:
+        raise HTTPException(status_code=400, detail="Clinic key cannot be empty")
+
+    clinic_data = read_clinic_config()
+    clinic_data[clinic_key] = body.adapter_config
+    save_clinic_config(clinic_data)
+    logger.info(f"Saved clinic adapter for {clinic_key}")
+
+    return {
+        "status": "SUCCESS",
+        "clinic_key": clinic_key,
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("src.api:app", host="0.0.0.0", port=8000, reload=True)

@@ -7,9 +7,9 @@ import {
   CheckCircle2,
   Search,
   Shield,
-  X,
 } from "lucide-react";
 import PaginationBar from "../common/Pagination";
+import ClinicOnboardingModal from "./ClinicOnboardingModal";
 
 const API_BASE = "http://localhost:8000";
 
@@ -33,18 +33,6 @@ export default function ConfigsView() {
 
   // Modals
   const [modalType, setModalType] = useState(null); // 'clinic', 'test', 'range', 'medicine'
-  const [clinicForm, setClinicForm] = useState({
-    key: "",
-    system_name: "",
-    doc_id: "data.documentId",
-    corr_id: "data.correlationId",
-    meta_field: "data.metaDetails",
-    resp_field: "data.responseDetails",
-    name_fields: "patient_name, patientName",
-    age_fields: "age, patient_age",
-    gender_fields: "gender, sex",
-    uhid_fields: "uhid, mrn",
-  });
   const [testForm, setTestForm] = useState({
     name: "",
     unit: "",
@@ -120,49 +108,6 @@ export default function ConfigsView() {
     }
   }
 
-  // Clinic Adapter Operations
-  async function handleAddClinic(e) {
-    e.preventDefault();
-    const key = clinicForm.key.trim().toUpperCase();
-    if (!key) return;
-    setSaving(true);
-    try {
-      const parseList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
-      const payload = {
-        clinic_key: key,
-        config: {
-          system_name: clinicForm.system_name.trim() || key,
-          document_id_field: clinicForm.doc_id.trim() || "data.documentId",
-          correlation_id_field: clinicForm.corr_id.trim() || "data.correlationId",
-          meta_details_field: clinicForm.meta_field.trim() || "data.metaDetails",
-          response_details_field: clinicForm.resp_field.trim() || "data.responseDetails",
-          patient_fields: {
-            patient_name: parseList(clinicForm.name_fields),
-            age: parseList(clinicForm.age_fields),
-            gender: parseList(clinicForm.gender_fields),
-            uhid: parseList(clinicForm.uhid_fields),
-          },
-        },
-      };
-      const res = await fetch(`${API_BASE}/api/configs/clinics`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        setModalType(null);
-        showFeedback("success", `Clinic adapter for "${key}" saved.`);
-        await fetchAllConfigs();
-      } else {
-        const err = await res.json();
-        alert(err.detail || "Failed to save clinic.");
-      }
-    } catch (err) {
-      alert("Error saving clinic: " + err.message);
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleDeleteClinic(key) {
     if (key === "DEFAULT") return alert("Cannot delete the DEFAULT fallback adapter.");
@@ -370,19 +315,21 @@ export default function ConfigsView() {
               }}
             >
               <span>{t.label}</span>
-              <span
-                style={{
-                  fontSize: "0.75rem",
-                  padding: "0.1rem 0.45rem",
-                  borderRadius: "10px",
-                  background: isActive ? "rgba(255, 255, 255, 0.25)" : "#f1f5f9",
-                  color: isActive ? "#ffffff" : "#64748b",
-                  fontFamily: "var(--font-mono)",
-                  fontWeight: 600,
-                }}
-              >
-                {t.count}
-              </span>
+              {t.count !== undefined && (
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    padding: "0.1rem 0.45rem",
+                    borderRadius: "10px",
+                    background: isActive ? "rgba(255, 255, 255, 0.25)" : "#f1f5f9",
+                    color: isActive ? "#ffffff" : "#64748b",
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 600,
+                  }}
+                >
+                  {t.count}
+                </span>
+              )}
             </button>
           );
         })}
@@ -434,14 +381,12 @@ export default function ConfigsView() {
                   <th>System Name</th>
                   <th>Document ID Field</th>
                   <th>Response Details Field</th>
-                  <th>Demographic Field Mapping</th>
                   <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(clinicsData).map(([key, cfg]) => {
                   const isDefault = key === "DEFAULT";
-                  const pFields = cfg.patient_fields || {};
                   return (
                     <tr key={key}>
                       <td>
@@ -461,14 +406,8 @@ export default function ConfigsView() {
                       <td style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-muted)" }}>
                         {cfg.response_details_field || "data.responseDetails"}
                       </td>
-                      <td>
-                        <div style={{ fontSize: "0.75rem", fontFamily: "var(--font-mono)", display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-                          <span>name: {Array.isArray(pFields.patient_name) ? pFields.patient_name.join(", ") : "-"}</span>
-                          <span>age: {Array.isArray(pFields.age) ? pFields.age.join(", ") : "-"}</span>
-                        </div>
-                      </td>
                       <td style={{ textAlign: "right" }}>
-                        {!isDefault ? (
+                        {!isDefault && (
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleDeleteClinic(key)}
@@ -477,8 +416,6 @@ export default function ConfigsView() {
                           >
                             <Trash2 size={13} />
                           </button>
-                        ) : (
-                          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Protected</span>
                         )}
                       </td>
                     </tr>
@@ -870,122 +807,12 @@ export default function ConfigsView() {
         </div>
       )}
 
-      {/* MODAL: ADD CLINIC */}
-      {modalType === "clinic" && (
-        <div className="modal-overlay" onClick={() => setModalType(null)}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "520px" }}>
-            <div className="modal-header">
-              <h3 style={{ fontSize: "1rem", fontWeight: 600 }}>Add Clinic Adapter</h3>
-              <button className="btn-close" onClick={() => setModalType(null)}>×</button>
-            </div>
-            <form onSubmit={handleAddClinic}>
-              <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
-                <div className="grid-2">
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.2rem" }}>
-                      Clinic Key Identifier *
-                    </label>
-                    <input
-                      type="text"
-                      className="search-input"
-                      placeholder="e.g. APOLLO"
-                      value={clinicForm.key}
-                      onChange={(e) => setClinicForm({ ...clinicForm, key: e.target.value })}
-                      required
-                      style={{ width: "100%" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.2rem" }}>
-                      System Name
-                    </label>
-                    <input
-                      type="text"
-                      className="search-input"
-                      placeholder="e.g. APOLLO_HOSPITALS"
-                      value={clinicForm.system_name}
-                      onChange={(e) => setClinicForm({ ...clinicForm, system_name: e.target.value })}
-                      style={{ width: "100%" }}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid-2">
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.2rem" }}>
-                      Document ID Path
-                    </label>
-                    <input
-                      type="text"
-                      className="search-input"
-                      value={clinicForm.doc_id}
-                      onChange={(e) => setClinicForm({ ...clinicForm, doc_id: e.target.value })}
-                      style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.2rem" }}>
-                      Response Details Path
-                    </label>
-                    <input
-                      type="text"
-                      className="search-input"
-                      value={clinicForm.resp_field}
-                      onChange={(e) => setClinicForm({ ...clinicForm, resp_field: e.target.value })}
-                      style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.2rem" }}>
-                    Patient Name Aliases (comma-separated)
-                  </label>
-                  <input
-                    type="text"
-                    className="search-input"
-                    value={clinicForm.name_fields}
-                    onChange={(e) => setClinicForm({ ...clinicForm, name_fields: e.target.value })}
-                    style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}
-                  />
-                </div>
-
-                <div className="grid-2">
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.2rem" }}>
-                      Age Aliases
-                    </label>
-                    <input
-                      type="text"
-                      className="search-input"
-                      value={clinicForm.age_fields}
-                      onChange={(e) => setClinicForm({ ...clinicForm, age_fields: e.target.value })}
-                      style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.2rem" }}>
-                      Gender Aliases
-                    </label>
-                    <input
-                      type="text"
-                      className="search-input"
-                      value={clinicForm.gender_fields}
-                      onChange={(e) => setClinicForm({ ...clinicForm, gender_fields: e.target.value })}
-                      style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ padding: "0.85rem 1.25rem", borderTop: "1px solid var(--border-color)", display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setModalType(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>Save Clinic</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* MODAL: ONBOARD CLINIC */}
+      <ClinicOnboardingModal
+        isOpen={modalType === "clinic"}
+        onClose={() => setModalType(null)}
+        onSuccess={fetchAllConfigs}
+      />
 
       {/* MODAL: ADD TEST */}
       {modalType === "test" && (

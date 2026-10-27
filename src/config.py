@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import json5
 import logging
 import re
 from dataclasses import dataclass, field
@@ -10,26 +10,17 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("veritas.config")
 
 
-def strip_json_comments(text: str) -> str:
-    pattern = r"//.*?$|/\*.*?\*/"
-    cleaned = re.sub(pattern, "", text, flags=re.MULTILINE | re.DOTALL)
-    cleaned = re.sub(r",\s*([\]}])", r"\1", cleaned)
-    return cleaned
-
-
 def load_jsonc(file_path: str | Path) -> Any:
+    """Load and parse a JSON/JSONC file supporting comments and trailing commas."""
     path = Path(file_path)
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file not found: {path}")
 
     with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    cleaned = strip_json_comments(content)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Failed to parse JSONC config '{path}': {exc}") from exc
+        try:
+            return json5.load(f)
+        except Exception as exc:
+            raise ValueError(f"Failed to parse JSONC config '{path}': {exc}") from exc
 
 
 @dataclass(frozen=True)

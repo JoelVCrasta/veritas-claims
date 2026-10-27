@@ -9,6 +9,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import jmespath
+
 logger = logging.getLogger("veritas.ingestion")
 
 
@@ -41,9 +43,16 @@ class IngestedDocument:
 
 
 def extract_nested_field(data: Dict[str, Any], path: str, default: Any = None) -> Any:
-    """Extract a value from nested dictionaries."""
-    if not path or not isinstance(data, dict):
+    """Extract a value from nested data structures."""
+    if not path or not isinstance(data, (dict, list)):
         return default
+    try:
+        val = jmespath.search(path, data)
+        if val is not None:
+            return val
+    except Exception:
+        pass
+
     curr = data
     for part in path.split("."):
         if isinstance(curr, dict):
@@ -51,6 +60,19 @@ def extract_nested_field(data: Dict[str, Any], path: str, default: Any = None) -
         else:
             return default
     return curr if curr is not None else default
+
+
+def _flatten_meta_details(meta_source: Any) -> Dict[str, str]:
+    """Normalize list of dicts or dict metadata into a flat key-value dict."""
+    res: Dict[str, str] = {}
+    if isinstance(meta_source, list):
+        for item in meta_source:
+            if isinstance(item, dict) and "key" in item and "value" in item:
+                res[item["key"]] = str(item["value"])
+    elif isinstance(meta_source, dict):
+        for k, v in meta_source.items():
+            res[k] = str(v)
+    return res
 
 
 class IngestionEngine:
@@ -157,7 +179,7 @@ class IngestionEngine:
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     def discover_files(self, input_dir: str | Path) -> List[Path]:
-        """Scan directory for JSON input files, sorted by filename."""
+        """Scan directory for JSON input files."""
         directory = Path(input_dir)
         if not directory.exists() or not directory.is_dir():
             logger.warning(f"Input directory does not exist: {directory}")
@@ -173,7 +195,7 @@ class IngestionEngine:
         return files
 
     def ingest_file(self, file_path: str | Path) -> IngestedDocument:
-        """Read, parse, and evaluate a single medical report JSON file."""
+        """Read, parse, and evaluate a single report JSON file."""
         path = Path(file_path)
         timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -224,26 +246,50 @@ class IngestionEngine:
         if not isinstance(data_block, dict):
             data_block = {}
 
-        # Extract metaDetails array first to detect source system
-        meta_list = data_block.get("metaDetails", [])
-        meta_dict: Dict[str, str] = {}
-        if isinstance(meta_list, list):
-            for item in meta_list:
-                if isinstance(item, dict) and "key" in item and "value" in item:
-                    meta_dict[item["key"]] = str(item["value"])
+        # Extract metaDetails array or object flexibly
+        meta_list = (
+            extract_nested_field(payload, "data.metaDetails")
+            or extract_nested_field(payload, "metaDetails")
+            or payload.get("metadata")
+            or data_block.get("metaDetails")
+        )
+        meta_dict = _flatten_meta_details(meta_list)
 
-        source_system = meta_dict.get("source_system", "UNKNOWN")
-        claim_no = meta_dict.get("claim_no", "")
-        nt_code = meta_dict.get("nt_code", "")
-        consumer_client_id = meta_dict.get("ConsumerClientId", "")
-        destination_identifier = meta_dict.get("DestinationIdentifier", "")
+        header_block = (
+            payload.get("header", {}) if isinstance(payload.get("header"), dict) else {}
+        )
+        source_system = (
+            meta_dict.get("source_system")
+            or payload.get("source_system")
+            or data_block.get("source_system")
+            or header_block.get("source_system")
+            or "UNKNOWN"
+        )
+        claim_no = meta_dict.get("claim_no", "") or header_block.get("claim_no", "")
+        nt_code = meta_dict.get("nt_code", "") or header_block.get("nt_code", "")
+        consumer_client_id = meta_dict.get("ConsumerClientId", "") or header_block.get(
+            "ConsumerClientId", ""
+        )
+        destination_identifier = meta_dict.get(
+            "DestinationIdentifier", ""
+        ) or header_block.get("DestinationIdentifier", "")
 
         # Resolve configured clinic adapter profile
+        sys_key = str(source_system).strip().upper()
         adapter = (
-            self.clinic_mappings.get(source_system)
+            self.clinic_mappings.get(sys_key)
+            or self.clinic_mappings.get(source_system)
             or self.clinic_mappings.get("DEFAULT")
             or {}
         )
+
+        # Support custom meta_details_field from adapter
+        custom_meta_field = adapter.get("meta_details_field")
+        if custom_meta_field and custom_meta_field != "data.metaDetails":
+            meta_dict.update(
+                _flatten_meta_details(extract_nested_field(payload, custom_meta_field))
+            )
+
         doc_field = adapter.get("document_id_field", "data.documentId")
         corr_field = adapter.get("correlation_id_field", "data.correlationId")
         resp_field = adapter.get("response_details_field", "data.responseDetails")
@@ -283,39 +329,22 @@ class IngestionEngine:
                 f"Duplicate document detected ({err_type}): {path.name} "
                 f"(doc_id={document_id or 'N/A'}, hash={payload_hash[:10]}...)"
             )
-            return IngestedDocument(
-                file_path=str(path),
-                file_name=path.name,
-                status=IngestionStatus.DUPLICATE_SUPPRESSED,
-                ingested_at=timestamp,
-                trace_id=trace_id,
-                document_id=document_id,
-                correlation_id=correlation_id,
-                source_system=source_system,
-                claim_no=claim_no,
-                nt_code=nt_code,
-                consumer_client_id=consumer_client_id,
-                destination_identifier=destination_identifier,
-                file_hash=file_hash,
+        else:
+            self.register_seen(
                 payload_hash=payload_hash,
-                raw_payload=payload,
-                response_details=response_details,
-                error_message=err_msg
-                or "Duplicate report content previously ingested and suppressed",
+                document_id=document_id,
+                claim_no=claim_no,
+                source_system=source_system,
             )
-
-        # Register successful document
-        self.register_seen(
-            payload_hash=payload_hash,
-            document_id=document_id,
-            claim_no=claim_no,
-            source_system=source_system,
-        )
 
         return IngestedDocument(
             file_path=str(path),
             file_name=path.name,
-            status=IngestionStatus.SUCCESS,
+            status=(
+                IngestionStatus.DUPLICATE_SUPPRESSED
+                if is_dup
+                else IngestionStatus.SUCCESS
+            ),
             ingested_at=timestamp,
             trace_id=trace_id,
             document_id=document_id,
@@ -329,4 +358,12 @@ class IngestionEngine:
             payload_hash=payload_hash,
             raw_payload=payload,
             response_details=response_details,
+            error_message=(
+                (
+                    err_msg
+                    or "Duplicate report content previously ingested and suppressed"
+                )
+                if is_dup
+                else None
+            ),
         )

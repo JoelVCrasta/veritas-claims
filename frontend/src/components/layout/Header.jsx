@@ -17,7 +17,7 @@ export default function Header({
       case "overview":
         return "Pipeline Operations Overview";
       case "documents":
-        return "Patient Reports & Submissions";
+        return "Patient Reports";
       case "lab_tests":
         return "Lab Tests";
       case "medications":

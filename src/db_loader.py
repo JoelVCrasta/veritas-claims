@@ -4,26 +4,19 @@ import csv
 import json
 import logging
 import sqlite3
+import sqlite_utils
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger("veritas.db_loader")
 
-SCHEMA_CSV_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "assets"
-    / "OUTPUT_database table"
-    / "Ourput-table-ideal-schema.csv"
-)
+SCHEMA_CSV_PATH = Path("assets/OUTPUT_database table/Ourput-table-ideal-schema.csv")
 
 
 def load_schema_from_csv(
-    csv_path: str | Path = SCHEMA_CSV_PATH,
+    path: Path = SCHEMA_CSV_PATH,
 ) -> List[Tuple[str, str]]:
-    path = Path(csv_path)
-    if not path.exists():
-        path = Path("assets/OUTPUT_database table/Ourput-table-ideal-schema.csv")
     columns: List[Tuple[str, str]] = []
     with open(path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -47,7 +40,7 @@ COLUMN_NAMES: List[str] = [col[0] for col in COLUMNS]
 
 
 class DatabaseManager:
-    """Handles schema creation, upserts, and dead-letter queue operations."""
+    """Handles schema creation, upserts, and dead-letter operations."""
 
     def __init__(self, db_path: str | Path = "data/veritas.db") -> None:
         self.db_path = Path(db_path)
@@ -120,32 +113,18 @@ class DatabaseManager:
         logger.info(f"Database initialized at {self.db_path} with schema.")
 
     def insert_records(self, records: List[Dict[str, Any]]) -> int:
-        """
-        Insert or update records into canonical_records.
-        Re-running the pipeline overwrites existing records by primary key without duplication.
-        """
         if not records:
             return 0
 
-        placeholders = ", ".join(["?"] * len(COLUMN_NAMES))
-        cols_str = ", ".join(COLUMN_NAMES)
-        sql = f"INSERT OR REPLACE INTO canonical_records ({cols_str}) VALUES ({placeholders})"
-
-        rows_to_insert = []
-        for r in records:
-            row_vals = [r.get(col) for col in COLUMN_NAMES]
-            rows_to_insert.append(row_vals)
-
         conn = self._get_connection()
         try:
-            with conn:
-                cursor = conn.cursor()
-                cursor.executemany(sql, rows_to_insert)
+            db = sqlite_utils.Database(conn)
+            db["canonical_records"].upsert_all(records, pk="id", alter=True)
         finally:
             conn.close()
 
-        logger.debug(f"Inserted/updated {len(rows_to_insert)} canonical records.")
-        return len(rows_to_insert)
+        logger.debug(f"Inserted {len(records)} canonical records.")
+        return len(records)
 
     def insert_dead_letter(
         self,
@@ -162,100 +141,79 @@ class DatabaseManager:
         )
         now_ts = datetime.now(timezone.utc).isoformat()
 
-        sql = """
-        INSERT OR REPLACE INTO dead_letter_records (
-            id, file_path, source_system, error_type, error_message, raw_payload, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """
-
         conn = self._get_connection()
         try:
-            with conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    sql,
-                    (
-                        record_id,
-                        file_path,
-                        source_system,
-                        error_type,
-                        error_message,
-                        payload_str,
-                        now_ts,
-                    ),
-                )
+            db = sqlite_utils.Database(conn)
+            db["dead_letter_records"].upsert(
+                {
+                    "id": record_id,
+                    "file_path": file_path,
+                    "source_system": source_system,
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "raw_payload": payload_str,
+                    "created_at": now_ts,
+                },
+                pk="id",
+            )
         finally:
             conn.close()
 
     def record_pipeline_run(self, run_stats: Dict[str, Any]) -> None:
         """Log pipeline execution statistics."""
-        sql = """
-        INSERT OR REPLACE INTO pipeline_runs (
-            run_id, start_time, end_time, status, files_scanned,
-            files_processed, files_failed, records_loaded,
-            records_flagged, duplicates_suppressed
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
         conn = self._get_connection()
         try:
-            with conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    sql,
-                    (
-                        run_stats.get("run_id"),
-                        run_stats.get("start_time"),
-                        run_stats.get("end_time"),
-                        run_stats.get("status"),
-                        run_stats.get("files_scanned", 0),
-                        run_stats.get("files_processed", 0),
-                        run_stats.get("files_failed", 0),
-                        run_stats.get("records_loaded", 0),
-                        run_stats.get("records_flagged", 0),
-                        run_stats.get("duplicates_suppressed", 0),
-                    ),
-                )
+            db = sqlite_utils.Database(conn)
+            db["pipeline_runs"].upsert(
+                {
+                    "run_id": run_stats.get("run_id"),
+                    "start_time": run_stats.get("start_time"),
+                    "end_time": run_stats.get("end_time"),
+                    "status": run_stats.get("status"),
+                    "files_scanned": run_stats.get("files_scanned", 0),
+                    "files_processed": run_stats.get("files_processed", 0),
+                    "files_failed": run_stats.get("files_failed", 0),
+                    "records_loaded": run_stats.get("records_loaded", 0),
+                    "records_flagged": run_stats.get("records_flagged", 0),
+                    "duplicates_suppressed": run_stats.get("duplicates_suppressed", 0),
+                },
+                pk="run_id",
+            )
+        finally:
+            conn.close()
+
+    def _query(
+        self, sql: str, params: Tuple[Any, ...] | List[Any] = ()
+    ) -> List[Dict[str, Any]]:
+        conn = self._get_connection()
+        try:
+            db = sqlite_utils.Database(conn)
+            return list(db.query(sql, tuple(params)))
         finally:
             conn.close()
 
     def get_summary_stats(self) -> Dict[str, Any]:
         """Aggregate total counts for dashboard cards."""
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-
-            cur.execute("SELECT COUNT(*) FROM canonical_records")
-            total_records = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(DISTINCT document_id) FROM canonical_records")
-            total_documents = cur.fetchone()[0]
-
-            cur.execute(
-                "SELECT COUNT(*) FROM canonical_records WHERE test_analytics IN ('OUTLIER', 'ABOVE_RANGE', 'BELOW_RANGE', 'INVALID')"
-            )
-            flagged_records = cur.fetchone()[0]
-
-            cur.execute(
-                "SELECT COUNT(*) FROM canonical_records WHERE test_analytics = 'OUTLIER'"
-            )
-            outlier_records = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM dead_letter_records")
-            dlq_count = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM pipeline_runs")
-            total_runs = cur.fetchone()[0]
-
-            return {
-                "total_records": total_records,
-                "total_documents": total_documents,
-                "flagged_records": flagged_records,
-                "outlier_records": outlier_records,
-                "dead_letter_count": dlq_count,
-                "total_runs": total_runs,
-            }
-        finally:
-            conn.close()
+        summary_sql = """
+        SELECT 
+            COUNT(*) AS total_records,
+            COUNT(DISTINCT document_id) AS total_documents,
+            SUM(CASE WHEN test_analytics IN ('OUTLIER', 'ABOVE_RANGE', 'BELOW_RANGE', 'INVALID') THEN 1 ELSE 0 END) AS flagged_records,
+            SUM(CASE WHEN test_analytics = 'OUTLIER' THEN 1 ELSE 0 END) AS outlier_records
+        FROM canonical_records
+        """
+        rows = self._query(summary_sql)
+        res = rows[0] if rows else {}
+        dlq_rows = self._query("SELECT COUNT(*) AS dlq_count FROM dead_letter_records")
+        runs_rows = self._query("SELECT COUNT(*) AS total_runs FROM pipeline_runs")
+        return {
+            "total_records": res.get("total_records") or 0,
+            "total_documents": res.get("total_documents") or 0,
+            "flagged_records": res.get("flagged_records") or 0,
+            "outlier_records": res.get("outlier_records") or 0,
+            "dead_letter_count": (dlq_rows[0].get("dlq_count") if dlq_rows else 0) or 0,
+            "total_runs": (runs_rows[0].get("total_runs") if runs_rows else 0) or 0,
+        }
 
     def get_flagged_records(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Retrieve flagged records (outliers, out-of-range, invalid)."""
@@ -268,13 +226,7 @@ class DatabaseManager:
         ORDER BY processed_at DESC
         LIMIT ?
         """
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(sql, (limit,))
-            return [dict(row) for row in cur.fetchall()]
-        finally:
-            conn.close()
+        return self._query(sql, (limit,))
 
     def get_clinic_quality_stats(self) -> List[Dict[str, Any]]:
         """Calculate quality metrics by source system."""
@@ -290,51 +242,38 @@ class DatabaseManager:
         FROM canonical_records
         GROUP BY source_system
         """
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(sql)
-            rows = [dict(r) for r in cur.fetchall()]
+        rows = self._query(sql)
+        dlq_rows = self._query(
+            "SELECT source_system, COUNT(*) AS cnt FROM dead_letter_records GROUP BY source_system"
+        )
+        dlq_map = {r["source_system"]: r["cnt"] for r in dlq_rows}
 
-            # Also fetch dead letters per clinic
-            cur.execute(
-                "SELECT source_system, COUNT(*) FROM dead_letter_records GROUP BY source_system"
+        for r in rows:
+            r["dead_letters"] = dlq_map.get(r["source_system"], 0)
+            tot = r["total_records"]
+            r["outlier_rate"] = (
+                round((r["outlier_count"] / tot) * 100, 2) if tot else 0.0
             )
-            dlq_map = dict(cur.fetchall())
 
-            for r in rows:
-                r["dead_letters"] = dlq_map.get(r["source_system"], 0)
-                tot = r["total_records"]
-                r["outlier_rate"] = (
-                    round((r["outlier_count"] / tot) * 100, 2) if tot else 0.0
-                )
-
-            return rows
-        finally:
-            conn.close()
+        return rows
 
     def search_records(self, query: str = "", limit: int = 50) -> List[Dict[str, Any]]:
         """Search canonical records by document_id, patient_name, uhid, claim_no, or test name."""
         if not query:
-            sql = "SELECT * FROM canonical_records ORDER BY processed_at DESC LIMIT ?"
-            params = (limit,)
-        else:
-            pattern = f"%{query.strip()}%"
-            sql = """
-            SELECT * FROM canonical_records
-            WHERE document_id LIKE ? OR patient_name LIKE ? OR uhid LIKE ?
-               OR claim_no LIKE ? OR test_name_canonical LIKE ? OR medicine LIKE ?
-            ORDER BY processed_at DESC LIMIT ?
-            """
-            params = (pattern, pattern, pattern, pattern, pattern, pattern, limit)
-
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(sql, params)
-            return [dict(row) for row in cur.fetchall()]
-        finally:
-            conn.close()
+            return self._query(
+                "SELECT * FROM canonical_records ORDER BY processed_at DESC LIMIT ?",
+                (limit,),
+            )
+        pattern = f"%{query.strip()}%"
+        sql = """
+        SELECT * FROM canonical_records
+        WHERE document_id LIKE ? OR patient_name LIKE ? OR uhid LIKE ?
+           OR claim_no LIKE ? OR test_name_canonical LIKE ? OR medicine LIKE ?
+        ORDER BY processed_at DESC LIMIT ?
+        """
+        return self._query(
+            sql, (pattern, pattern, pattern, pattern, pattern, pattern, limit)
+        )
 
     def get_documents(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Retrieve aggregated reports grouped by document_id."""
@@ -363,25 +302,14 @@ class DatabaseManager:
         ORDER BY processed_at DESC
         LIMIT ?
         """
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(sql, (limit,))
-            return [dict(row) for row in cur.fetchall()]
-        finally:
-            conn.close()
+        return self._query(sql, (limit,))
 
     def get_existing_document_ids(self) -> Set[str]:
         """Fetch set of all distinct document_ids currently stored in canonical_records."""
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT DISTINCT document_id FROM canonical_records WHERE document_id IS NOT NULL AND document_id != ''"
-            )
-            return {row[0] for row in cur.fetchall()}
-        finally:
-            conn.close()
+        rows = self._query(
+            "SELECT DISTINCT document_id FROM canonical_records WHERE document_id IS NOT NULL AND document_id != ''"
+        )
+        return {r["document_id"] for r in rows if r.get("document_id")}
 
     def get_records(
         self,
@@ -412,27 +340,27 @@ class DatabaseManager:
         where_str = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         sql = f"SELECT * FROM canonical_records {where_str} ORDER BY processed_at DESC LIMIT ?"
         params.append(limit)
+        return self._query(sql, params)
 
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(sql, tuple(params))
-            return [dict(row) for row in cur.fetchall()]
-        finally:
-            conn.close()
+    def get_pipeline_runs(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Retrieve pipeline run history."""
+        return self._query(
+            "SELECT * FROM pipeline_runs ORDER BY start_time DESC LIMIT ?", (limit,)
+        )
+
+    def get_dead_letter_records(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retrieve records from dead-letter queue."""
+        return self._query(
+            "SELECT * FROM dead_letter_records ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        )
 
     def get_document_bundle(self, document_id: str) -> Dict[str, Any]:
         """Fetch full report: document summary, lab tests, medications, and raw JSON."""
-        conn = self._get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT * FROM canonical_records WHERE document_id = ? ORDER BY id",
-                (document_id,),
-            )
-            rows = [dict(r) for r in cur.fetchall()]
-        finally:
-            conn.close()
+        rows = self._query(
+            "SELECT * FROM canonical_records WHERE document_id = ? ORDER BY id",
+            (document_id,),
+        )
 
         if not rows:
             return {}

@@ -62,11 +62,10 @@ python -m unittest discover tests
 
 ### 5. Start the Application
 
-**Start the Backend:**
+**Start the Backend API:**
 ```bash
-python src.api:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
 ```
-
 
 **Start the Web Dashboard:**
 ```bash
@@ -79,9 +78,10 @@ npm run dev
 
 ## Key Design Decisions
 
-1. **Zero-Code Onboarding**:
-   - Clinic-specific field mappings, test aliases, reference ranges, and medicine dictionaries are stored in declarative jsonc config files.
-   - New clinics or updated formats can be onboarded or adjusted via configuration or the UI Configuration tab without modifying pipeline code.
+1. **AI Clinic Onboarding & Zero-Code Schema Mapping**:
+   - New clinics can be onboarded in seconds through the Clinic Adapters.
+   - Provide any raw clinic JSON report and onboard it. The engine uses Groq Qwen model (`qwen3.8-27b`) to automatically infer document envelopes, demographic paths, observation lists, and canonical database mappings.
+   - Operators can review the live canonical 78-column database preview and save the adapter profile directly to configurations without touching any code.
 
 2. **Fast Rule-Based Processing**:
    - Uses dictionary alias lookups with fuzzy matching rather than heavy runtime LLM calls.

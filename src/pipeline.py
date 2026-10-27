@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from src.config import load_pipeline_config
 from src.db_loader import DatabaseManager
 from src.ingestion import IngestedDocument, IngestionEngine, IngestionStatus
+from src.models import CanonicalRecord, resolve_field_value
 from src.standardisation import StandardisationEngine
 from src.validation import ValidationEngine
 
@@ -49,9 +50,11 @@ class MedicalDataPipeline:
         now_ts = datetime.now(timezone.utc).isoformat()
         records: List[Dict[str, Any]] = []
 
-        # Resolve clinic adapter profile for field mapping
+        # Resolve clinic adapter profile for field mapping (case-insensitive)
+        sys_key = str(doc.source_system).strip().upper()
         adapter = (
-            self.config.clinic_mappings.get(doc.source_system)
+            self.config.clinic_mappings.get(sys_key)
+            or self.config.clinic_mappings.get(doc.source_system)
             or self.config.clinic_mappings.get("DEFAULT")
             or {}
         )
@@ -79,18 +82,37 @@ class MedicalDataPipeline:
         # Track demographics
         doc_demographics: Dict[str, Any] = {}
 
+        lab_fields = adapter.get("lab_fields", {})
+        med_fields = adapter.get("medication_fields", {})
+
         for resp_idx, resp_item in enumerate(doc.response_details):
-            classifier = resp_item.get("classifier", "")
+            classifier = resp_item.get("classifier", "").lower()
             data_block = resp_item.get("data", {})
             if not isinstance(data_block, dict):
                 continue
 
+            tests_array_key = lab_fields.get("tests_array", "report_details")
+            has_lab_tests = any(k in data_block for k in (tests_array_key, "report_details", "tests", "investigations"))
+
             # Lab Report Classifier
-            if classifier == "lab_report":
-                basic_info = data_block.get("basic_info", {})
+            if classifier in ("lab_report", "lab", "laboratory", "pathology") or (not classifier and has_lab_tests):
+                basic_info = (
+                    data_block.get("basic_info")
+                    or data_block.get("demographics")
+                    or data_block.get("patient")
+                    or data_block.get("patient_info")
+                    or data_block
+                )
                 demo = self.standardiser.standardize_demographics(
                     basic_info, field_map=patient_field_map
                 )
+
+                header_facility = (
+                    doc.raw_payload.get("header", {}).get("facility", "")
+                    if isinstance(doc.raw_payload.get("header"), dict)
+                    else ""
+                )
+                facility_name = demo.hospital_name or header_facility
 
                 doc_demographics = {
                     "patient_name": demo.patient_name,
@@ -99,23 +121,44 @@ class MedicalDataPipeline:
                     "age_text": demo.age_text,
                     "gender": demo.gender,
                     "uhid": demo.uhid,
-                    "hospital_name": demo.hospital_name,
+                    "hospital_name": facility_name,
                     "doctor_name": demo.doctor_name,
                     "bill_date": demo.bill_date,
                     "reports_date": demo.reports_date,
                     "basic_info_age": str(basic_info.get("age", "")),
                     "basic_info_bill_date": str(basic_info.get("bill_date", "")),
-                    "lab_or_hospital_name": demo.hospital_name,
+                    "lab_or_hospital_name": facility_name,
                     "report_date": demo.reports_date,
                 }
 
-                report_details = data_block.get("report_details", [])
+                report_details = (
+                    data_block.get(tests_array_key)
+                    or data_block.get("report_details")
+                    or data_block.get("tests")
+                    or data_block.get("investigations")
+                    or []
+                )
+                t_name_key = lab_fields.get("test_name", "test_name")
+                t_res_key = lab_fields.get("result", "result")
+                t_unit_key = lab_fields.get("unit", "unit")
+                t_range_key = lab_fields.get("range", "range")
+                t_analytics_key = lab_fields.get("test_analytics", "test_analytics")
+
                 for test_idx, raw_test in enumerate(report_details):
                     if not isinstance(raw_test, dict):
                         continue
 
+                    normalized_raw_test = {
+                        "test_name": raw_test.get(t_name_key, raw_test.get("test_name", "")),
+                        "result": raw_test.get(t_res_key, raw_test.get("result")),
+                        "unit": raw_test.get(t_unit_key, raw_test.get("unit", "")),
+                        "range": raw_test.get(t_range_key, raw_test.get("range", "")),
+                        "test_analytics": raw_test.get(t_analytics_key, raw_test.get("test_analytics", "")),
+                        "page_no": raw_test.get(lab_fields.get("page_no", "page_no"), raw_test.get("page_no", 0)),
+                    }
+
                     # Standardize lab test
-                    std_test = self.standardiser.standardize_lab_test(raw_test)
+                    std_test = self.standardiser.standardize_lab_test(normalized_raw_test)
                     if not std_test:
                         continue
 
@@ -123,55 +166,29 @@ class MedicalDataPipeline:
                     std_test = self.validator.enrich_test(std_test)
 
                     record_id = f"{doc_id}_LAB_{resp_idx}_{test_idx}"
-                    record: Dict[str, Any] = {
-                        "id": record_id,
-                        "record_type": "lab_test",
-                        **base_meta,
-                        **doc_demographics,
-                        "test_name_canonical": std_test.test_name_canonical,
-                        "test_name_original": std_test.test_name_original,
-                        "result_value": std_test.result_value,
-                        "result_text": std_test.result_text,
-                        "unit_canonical": std_test.unit_canonical,
-                        "unit_original": std_test.unit_original,
-                        "range_low": std_test.range_low,
-                        "range_high": std_test.range_high,
-                        "range_text": std_test.range_text,
-                        "test_analytics": std_test.test_analytics,
-                        "normalization_method": std_test.normalization_method,
-                        "normalization_confidence": std_test.normalization_confidence,
-                        "report_details_page_no": std_test.page_no,
-                        "report_details_range": std_test.range_text,
-                        "report_details_result": std_test.result_text,
-                        "report_details_test_analytics": std_test.test_analytics,
-                        "report_details_test_name": std_test.test_name_original,
-                        "report_details_unit": std_test.unit_original,
-                        "page_no": std_test.page_no,
-                        "page_number": std_test.page_no,
-                        "test_name": std_test.test_name_original,
-                        "result": std_test.result_text,
-                        "result_text_original": std_test.result_text,
-                        "unit": std_test.unit_original,
-                        "range": std_test.range_text,
-                        "range_text_original": std_test.range_text,
-                    }
-                    records.append(record)
+                    rec = CanonicalRecord.create_lab_test(
+                        record_id=record_id,
+                        base_meta=base_meta,
+                        demographics=doc_demographics,
+                        std_test=std_test,
+                    )
+                    records.append(rec.model_dump())
 
             # Discharge Summary Classifier
             elif classifier == "discharge_summary":
 
-                def get_patient_val(field_name: str, fallback_keys: List[str]) -> Any:
-                    keys = patient_field_map.get(field_name) or fallback_keys
-                    for k in keys:
-                        if k in data_block and data_block[k] not in (None, ""):
-                            return data_block[k]
-                    return ""
-
-                raw_patient_name = get_patient_val(
-                    "patient_name", ["patientName", "patient_name", "name"]
+                raw_patient_name = resolve_field_value(
+                    data_block,
+                    patient_field_map.get("patient_name") or ["patientName", "patient_name", "name"],
                 )
-                raw_age = get_patient_val("age", ["age", "patient_age"])
-                raw_gender = get_patient_val("gender", ["gender", "sex"])
+                raw_age = resolve_field_value(
+                    data_block,
+                    patient_field_map.get("age") or ["age", "patient_age"],
+                )
+                raw_gender = resolve_field_value(
+                    data_block,
+                    patient_field_map.get("gender") or ["gender", "sex"],
+                )
 
                 age_norm, age_years, age_text = self.standardiser.parse_age(raw_age)
                 gender_norm = self.standardiser.normalize_gender(raw_gender)
@@ -195,11 +212,7 @@ class MedicalDataPipeline:
 
                 # Summary root record
                 summary_id = f"{doc_id}_DISCHARGE_{resp_idx}"
-                summary_record: Dict[str, Any] = {
-                    "id": summary_id,
-                    "record_type": "discharge_summary",
-                    **base_meta,
-                    **discharge_demo,
+                summary_details = {
                     "admission_date": admission_date,
                     "discharge_date": discharge_date,
                     "diagnosis": str(data_block.get("diagnosis", "") or "").strip(),
@@ -232,38 +245,50 @@ class MedicalDataPipeline:
                         data_block.get("courseDuringHospitalisation", [])
                     ),
                 }
-                records.append(summary_record)
+                rec = CanonicalRecord.create_discharge_summary(
+                    record_id=summary_id,
+                    base_meta=base_meta,
+                    discharge_demo=discharge_demo,
+                    summary_details=summary_details,
+                )
+                records.append(rec.model_dump())
 
                 # Discharge medications
-                medications = data_block.get("dischargeMedications", [])
+                meds_array_key = med_fields.get("meds_array", "dischargeMedications")
+                medications = (
+                    data_block.get(meds_array_key)
+                    or data_block.get("dischargeMedications")
+                    or data_block.get("medications")
+                    or data_block.get("prescriptions")
+                    or []
+                )
+                m_name_key = med_fields.get("medicine", "medicine")
+                m_dose_key = med_fields.get("dose", "dose")
+                m_freq_key = med_fields.get("frequency", "frequency")
+                m_type_key = med_fields.get("type", "type")
+
                 for med_idx, raw_med in enumerate(medications):
                     if not isinstance(raw_med, dict):
                         continue
-                    med_name = str(raw_med.get("medicine", "")).strip()
+                    med_name = str(raw_med.get(m_name_key, raw_med.get("medicine", ""))).strip()
                     if not med_name or med_name.lower() in ("n/a", "na", "none", "-"):
                         continue
 
-                    std_med = self.standardiser.standardize_medication(raw_med)
-                    med_id = f"{doc_id}_MED_{resp_idx}_{med_idx}"
-
-                    med_record: Dict[str, Any] = {
-                        "id": med_id,
-                        "record_type": "medication",
-                        **base_meta,
-                        **discharge_demo,
-                        "medicine": std_med.medicine,
-                        "dose": std_med.dose,
-                        "frequency": std_med.frequency,
-                        "medicine_type": std_med.medicine_type,
-                        "medication_name": std_med.medicine,
-                        "medication_medicine": std_med.medicine_original,
-                        "medication_dose": std_med.dose,
-                        "medication_frequency": std_med.frequency,
-                        "discharge_medications_medicine": std_med.medicine_original,
-                        "discharge_medications_dose": std_med.dose,
-                        "discharge_medications_frequency": std_med.frequency,
+                    normalized_med = {
+                        "medicine": med_name,
+                        "dose": raw_med.get(m_dose_key, raw_med.get("dose", "")),
+                        "frequency": raw_med.get(m_freq_key, raw_med.get("frequency", "")),
+                        "type": raw_med.get(m_type_key, raw_med.get("type", "")),
                     }
-                    records.append(med_record)
+                    std_med = self.standardiser.standardize_medication(normalized_med)
+                    med_id = f"{doc_id}_MED_{resp_idx}_{med_idx}"
+                    med_rec = CanonicalRecord.create_medication(
+                        record_id=med_id,
+                        base_meta=base_meta,
+                        discharge_demo=discharge_demo,
+                        std_med=std_med,
+                    )
+                    records.append(med_rec.model_dump())
 
         return records
 
