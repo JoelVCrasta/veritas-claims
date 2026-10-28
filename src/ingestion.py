@@ -16,7 +16,8 @@ logger = logging.getLogger("veritas.ingestion")
 
 class IngestionStatus(str, Enum):
     SUCCESS = "SUCCESS"
-    DUPLICATE_SUPPRESSED = "DUPLICATE_SUPPRESSED"
+    DUPLICATE = "DUPLICATE"
+    DUPLICATE_SUPPRESSED = "DUPLICATE"
     MALFORMED_JSON = "MALFORMED_JSON"
     SCHEMA_ERROR = "SCHEMA_ERROR"
 
@@ -340,11 +341,7 @@ class IngestionEngine:
         return IngestedDocument(
             file_path=str(path),
             file_name=path.name,
-            status=(
-                IngestionStatus.DUPLICATE_SUPPRESSED
-                if is_dup
-                else IngestionStatus.SUCCESS
-            ),
+            status=(IngestionStatus.DUPLICATE if is_dup else IngestionStatus.SUCCESS),
             ingested_at=timestamp,
             trace_id=trace_id,
             document_id=document_id,

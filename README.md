@@ -48,19 +48,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Run the Pipeline
-Execute ingestion, standardisation, and database storage over the sample files:
-```bash
-python -m src.pipeline --input sample_data --db data/veritas.db
-```
-
-### 4. Run Unit Tests
+### 3. Run Unit Tests
 Run the standardisation and validation tests:
 ```bash
 python -m unittest discover tests
 ```
 
-### 5. Start the Application
+### 4. Start the Application
 
 **Start the Backend API:**
 ```bash

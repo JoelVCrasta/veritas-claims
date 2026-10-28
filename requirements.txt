@@ -10,3 +10,5 @@ rapidfuzz>=3.9.0
 json5>=0.10.0
 jmespath>=1.0.0
 sqlite-utils>=3.36.0
+watchdog>=6.0.0
+python-multipart>=0.0.20

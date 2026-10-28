@@ -2,23 +2,43 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
-
-load_dotenv()
-
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src.config import load_jsonc
 from src.db_loader import DatabaseManager
-from src.pipeline import MedicalDataPipeline
+from src.pipeline import Pipeline
+from src.watcher import StreamingEngine
+
+load_dotenv()
 
 logger = logging.getLogger("veritas.api")
 
-app = FastAPI()
+DB_PATH = "data/veritas.db"
+INPUT_DIR = "sample_data"
+CONFIG_DIR = "config"
+
+streaming_engine: Optional[StreamingEngine] = None
+pipeline_instance: Optional[Pipeline] = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global streaming_engine, pipeline_instance
+    pipeline_instance = Pipeline(config_dir=CONFIG_DIR, db_path=DB_PATH)
+    streaming_engine = StreamingEngine(pipeline_instance, watch_dir=INPUT_DIR)
+    streaming_engine.start(process_existing=True)
+    yield
+    if streaming_engine:
+        streaming_engine.stop()
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,18 +48,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_PATH = "data/veritas.db"
-INPUT_DIR = "sample_data"
-CONFIG_DIR = "config"
-
 
 def get_db() -> DatabaseManager:
     return DatabaseManager(DB_PATH)
-
-
-class PipelineRunResponse(BaseModel):
-    status: str
-    run_stats: Dict[str, Any]
 
 
 @app.get("/api/stats")
@@ -109,8 +120,8 @@ def get_records(
 
 
 @app.get("/api/runs")
-def get_runs(limit: int = Query(default=10, ge=1, le=50)) -> List[Dict[str, Any]]:
-    """Retrieve execution log history."""
+def get_runs(limit: int = Query(default=50, ge=1, le=200)) -> List[Dict[str, Any]]:
+    """Retrieve execution log history (per-file streaming audit entries)."""
     return get_db().get_pipeline_runs(limit=limit)
 
 
@@ -122,16 +133,25 @@ def get_dead_letters(
     return get_db().get_dead_letter_records(limit=limit)
 
 
-@app.post("/api/run_pipeline", response_model=PipelineRunResponse)
-def run_pipeline() -> PipelineRunResponse:
-    """Trigger an execution run of the ingestion, standardisation, and validation pipeline."""
-    try:
-        pipeline = MedicalDataPipeline(config_dir=CONFIG_DIR, db_path=DB_PATH)
-        stats = pipeline.run(INPUT_DIR)
-        return PipelineRunResponse(status="SUCCESS", run_stats=stats)
-    except Exception as exc:
-        logger.error(f"Pipeline execution error: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+@app.post("/api/stream/upload")
+async def upload_stream_file(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Upload a JSON medical report file directly into the streaming pipeline."""
+    if not file.filename.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only JSON files are supported.")
+
+    target_path = Path(INPUT_DIR) / file.filename
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    content = await file.read()
+    with open(target_path, "wb") as f:
+        f.write(content)
+
+    global pipeline_instance
+    if not pipeline_instance:
+        pipeline_instance = Pipeline(config_dir=CONFIG_DIR, db_path=DB_PATH)
+
+    stats = pipeline_instance.process_file(target_path)
+    return {"status": "SUCCESS", "file_name": file.filename, "run_stats": stats}
 
 
 # Configuration Management Endpoints

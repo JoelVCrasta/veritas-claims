@@ -11,7 +11,7 @@ logger = logging.getLogger("veritas.config")
 
 
 def load_jsonc(file_path: str | Path) -> Any:
-    """Load and parse a JSON/JSONC file supporting comments and trailing commas."""
+    """Load and parse a JSONC file."""
     path = Path(file_path)
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file not found: {path}")

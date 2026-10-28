@@ -59,45 +59,77 @@ export default function OverviewView({ stats, runs }) {
             <span className="stat-icon"><ShieldAlert size={16} /></span>
           </div>
           <div className="stat-value">{stats ? stats.dead_letter_count.toLocaleString() : "-"}</div>
-          <div className="stat-desc">Suppressed duplicates and format errors</div>
+          <div className="stat-desc">Duplicates and format errors</div>
         </div>
       </div>
 
-      {/* Execution Runs Table */}
+      {/* Audit Table */}
       <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">Pipeline Audit</h3>
+          <span className="badge badge-unvalidated" style={{ fontFamily: "var(--font-mono)" }}>
+            {runs.length} events logged
+          </span>
+        </div>
+
         <div className="table-container">
           <table className="table">
             <thead>
               <tr>
-                <th>Execution ID</th>
-                <th>Run Timestamp</th>
+                <th>Run ID</th>
+                <th>File Name</th>
+                <th>Timestamp</th>
                 <th>Status</th>
-                <th>Files Scanned</th>
-                <th>Processed</th>
-                <th>Duplicates Suppressed</th>
-                <th>Records Stored</th>
+                <th>Records Loaded</th>
                 <th>Flagged</th>
+                <th>Duration</th>
               </tr>
             </thead>
             <tbody>
               {runs.length === 0 ? (
-                <tr><td colSpan="8" className="text-center">No pipeline executions recorded yet.</td></tr>
+                <tr>
+                  <td colSpan="7" className="text-center" style={{ padding: "2rem", color: "var(--text-muted)" }}>
+                    No streaming file events recorded yet. Drop JSON files into sample_data/ to begin ingestion.
+                  </td>
+                </tr>
               ) : (
                 paginate(runs, runsPage, runsSize).map((r) => (
                   <tr key={r.run_id}>
-                    <td style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>{r.run_id}</td>
-                    <td>{new Date(r.start_time).toLocaleString()}</td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: "0.85rem" }}>
+                      {r.run_id}
+                    </td>
                     <td>
-                      <span className={`badge ${r.status === "COMPLETED" ? "badge-success" : "badge-outlier"}`}>
-                        {r.status}
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
+                        {r.file_name || "raw_payload.json"}
                       </span>
                     </td>
-                    <td style={{ fontFamily: "var(--font-mono)" }}>{r.files_scanned}</td>
-                    <td style={{ fontFamily: "var(--font-mono)" }}>{r.files_processed}</td>
-                    <td style={{ fontFamily: "var(--font-mono)" }}>{r.duplicates_suppressed}</td>
-                    <td style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>{r.records_loaded}</td>
-                    <td style={{ fontFamily: "var(--font-mono)", color: r.records_flagged > 0 ? "var(--text-amber)" : "inherit" }}>
+                    <td style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                      {new Date(r.start_time).toLocaleString()}
+                    </td>
+                    <td>
+                      <span className={`badge ${
+                        r.status === "COMPLETED"
+                          ? "badge-success"
+                          : (r.status === "DUPLICATE" || r.status === "DUPLICATE_SUPPRESSED")
+                          ? "badge-above"
+                          : "badge-outlier"
+                      }`}>
+                        {r.status === "DUPLICATE_SUPPRESSED" ? "DUPLICATE" : r.status}
+                      </span>
+                    </td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: "0.85rem" }}>
+                      {r.records_loaded}
+                    </td>
+                    <td style={{
+                      fontFamily: "var(--font-mono)",
+                      fontWeight: 600,
+                      fontSize: "0.85rem",
+                      color: r.records_flagged > 0 ? "var(--text-amber)" : "var(--text-muted)",
+                    }}>
                       {r.records_flagged}
+                    </td>
+                    <td style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                      {r.duration_ms ? `${Number(r.duration_ms).toFixed(1)} ms` : "< 1 ms"}
                     </td>
                   </tr>
                 ))

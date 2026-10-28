@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useRef, useState } from "react";
 import {
   Activity,
   FileText,
@@ -11,8 +11,9 @@ import {
   Building2,
   ShieldAlert,
   Sliders,
-  Play,
+  UploadCloud,
   RefreshCw,
+  Radio,
 } from "lucide-react";
 
 export default function Sidebar({
@@ -26,9 +27,7 @@ export default function Sidebar({
   dischargesCount = 0,
   flaggedCount = 0,
   deadLettersCount = 0,
-  pipelineStatus,
-  isProcessing,
-  onRunPipeline,
+  onUploadFile,
   onRefresh,
 }) {
   const handleNavClick = (tab) => {
@@ -202,31 +201,6 @@ export default function Sidebar({
           <span>Configurations</span>
         </button>
       </nav>
-
-      <div className="sidebar-footer">
-        <button
-          onClick={onRunPipeline}
-          disabled={isProcessing}
-          className="btn btn-primary"
-          style={{ width: "100%" }}
-        >
-          <Play size={15} />
-          <span>{isProcessing ? "Running..." : "Run Pipeline"}</span>
-        </button>
-        <button
-          onClick={onRefresh}
-          className="btn btn-secondary"
-          style={{
-            width: "100%",
-            background: "#1e293b",
-            color: "#f8fafc",
-            borderColor: "#334155",
-          }}
-        >
-          <RefreshCw size={14} />
-          <span>Refresh Data</span>
-        </button>
-      </div>
     </aside>
   );
 }

@@ -43,12 +43,13 @@ export default function App() {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [selectedBundle, setSelectedBundle] = useState(null);
 
-  // Pipeline Status
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [pipelineStatus, setPipelineStatus] = useState("READY");
-
   useEffect(() => {
     fetchAllData();
+    // Live interval polling to stream new file events into the UI
+    const interval = setInterval(() => {
+      fetchAllData();
+    }, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   async function fetchAllData() {
@@ -89,24 +90,23 @@ export default function App() {
     }
   }
 
-  async function handleRunPipeline() {
-    setIsProcessing(true);
-    setPipelineStatus("PROCESSING...");
+  async function handleUploadFile(file) {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
     try {
-      const res = await fetch(`${API_BASE}/api/run_pipeline`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/api/stream/upload`, {
+        method: "POST",
+        body: formData,
+      });
       const data = await res.json();
-      if (data.status === "SUCCESS") {
-        setPipelineStatus("READY");
+      if (res.ok && data.status === "SUCCESS") {
         await fetchAllData();
       } else {
-        setPipelineStatus("FAILED");
-        alert("Pipeline error: " + (data.message || "Unknown error"));
+        alert("Streaming ingestion error: " + (data.detail || data.message || "Failed to process file"));
       }
     } catch (err) {
-      setPipelineStatus("ERROR");
-      alert("Failed to execute pipeline via API: " + err.message);
-    } finally {
-      setIsProcessing(false);
+      alert("Failed to stream report file: " + err.message);
     }
   }
 
@@ -169,9 +169,7 @@ export default function App() {
         dischargesCount={discharges.length}
         flaggedCount={flagged.length}
         deadLettersCount={deadLetters.length}
-        pipelineStatus={pipelineStatus}
-        isProcessing={isProcessing}
-        onRunPipeline={handleRunPipeline}
+        onUploadFile={handleUploadFile}
         onRefresh={fetchAllData}
       />
 

@@ -76,14 +76,17 @@ class DatabaseManager:
         create_runs_sql = """
         CREATE TABLE IF NOT EXISTS pipeline_runs (
             run_id TEXT PRIMARY KEY,
+            file_name TEXT,
             start_time TEXT,
             end_time TEXT,
+            duration_ms REAL DEFAULT 0.0,
             status TEXT,
-            files_scanned INTEGER DEFAULT 0,
+            files_scanned INTEGER DEFAULT 1,
             files_processed INTEGER DEFAULT 0,
             files_failed INTEGER DEFAULT 0,
             records_loaded INTEGER DEFAULT 0,
             records_flagged INTEGER DEFAULT 0,
+            duplicates INTEGER DEFAULT 0,
             duplicates_suppressed INTEGER DEFAULT 0
         );
         """
@@ -167,17 +170,25 @@ class DatabaseManager:
             db["pipeline_runs"].upsert(
                 {
                     "run_id": run_stats.get("run_id"),
+                    "file_name": run_stats.get("file_name", ""),
                     "start_time": run_stats.get("start_time"),
                     "end_time": run_stats.get("end_time"),
+                    "duration_ms": run_stats.get("duration_ms", 0.0),
                     "status": run_stats.get("status"),
-                    "files_scanned": run_stats.get("files_scanned", 0),
+                    "files_scanned": run_stats.get("files_scanned", 1),
                     "files_processed": run_stats.get("files_processed", 0),
                     "files_failed": run_stats.get("files_failed", 0),
                     "records_loaded": run_stats.get("records_loaded", 0),
                     "records_flagged": run_stats.get("records_flagged", 0),
-                    "duplicates_suppressed": run_stats.get("duplicates_suppressed", 0),
+                    "duplicates": run_stats.get(
+                        "duplicates", run_stats.get("duplicates_suppressed", 0)
+                    ),
+                    "duplicates_suppressed": run_stats.get(
+                        "duplicates_suppressed", run_stats.get("duplicates", 0)
+                    ),
                 },
                 pk="run_id",
+                alter=True,
             )
         finally:
             conn.close()
@@ -347,6 +358,13 @@ class DatabaseManager:
         return self._query(
             "SELECT * FROM pipeline_runs ORDER BY start_time DESC LIMIT ?", (limit,)
         )
+
+    def get_audited_file_names(self) -> List[str]:
+        """Retrieve distinct file names that have already been recorded in pipeline_runs."""
+        rows = self._query(
+            "SELECT DISTINCT file_name FROM pipeline_runs WHERE file_name IS NOT NULL AND file_name != ''"
+        )
+        return [r["file_name"] for r in rows]
 
     def get_dead_letter_records(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Retrieve records from dead-letter queue."""
